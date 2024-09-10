@@ -94,7 +94,10 @@ func (l *lexer) getNextToken() (token, error) {
 
 func main() {
 	if len(os.Args) < 2 {
-		panic("not yet implemented. TODO: Read from stdin")
+		if err := parseFromReader(os.Stdin); err != nil {
+			panic(err)
+		}
+		return
 	}
 
 	file, err := os.Open(os.Args[1])
@@ -103,8 +106,14 @@ func main() {
 	}
 	defer file.Close()
 
+	if err := parseFromReader(file); err != nil {
+		panic(err)
+	}
+}
+
+func parseFromReader(reader io.Reader) error {
 	tokens := make([]token, 0, 10)
-	lexer := newLexer(file)
+	lexer := newLexer(reader)
 	for {
 		token, err := lexer.getNextToken()
 		if err == io.EOF {
@@ -119,6 +128,8 @@ func main() {
 	if err := parse(tokens); err != nil {
 		panic(err)
 	}
+
+	return nil
 }
 
 func parse(tokens []token) error {
