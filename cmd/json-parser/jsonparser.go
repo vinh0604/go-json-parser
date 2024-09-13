@@ -69,7 +69,7 @@ func newLexer(reader io.Reader) *lexer {
 
 func (l *lexer) getNextToken() (token, error) {
 	if len(l.buf) == 0 {
-		buf := make([]byte, 32)
+		buf := make([]byte, 64)
 		n, err := l.reader.Read(buf)
 		if err != nil {
 			return token{}, err
@@ -78,7 +78,8 @@ func (l *lexer) getNextToken() (token, error) {
 		l.buf = buf[:n]
 	}
 
-	for i := 0; i < len(l.buf); i++ {
+	var i int
+	for i < len(l.buf) {
 		switch l.buf[i] {
 		case '{':
 			l.buf = l.buf[i+1:]
@@ -86,10 +87,55 @@ func (l *lexer) getNextToken() (token, error) {
 		case '}':
 			l.buf = l.buf[i+1:]
 			return token{tokenType: OBJECT_END}, nil
+		case '[':
+			l.buf = l.buf[i+1:]
+			return token{tokenType: ARRAY_START}, nil
+		case ']':
+			l.buf = l.buf[i+1:]
+			return token{tokenType: ARRAY_END}, nil
+		case '"':
+			strVal := make([]byte, 0, 8)
+			j := i + 1
+			escape := false
+			for ; j < len(l.buf); j++ {
+				if l.buf[j] == '"' && !escape {
+					break
+				}
+				strVal = append(strVal, l.buf[j])
+				if l.buf[j] == '\\' {
+					escape = !escape
+				} else {
+					escape = false
+				}
+			}
+
+			if j < len(l.buf) {
+				l.buf = l.buf[j+1:]
+				return token{tokenType: STRING, value: strVal}, nil
+			} else {
+				return token{}, fmt.Errorf("TODO: handle string spanning multiple buffers")
+			}
+		case ':':
+			l.buf = l.buf[i+1:]
+			return token{tokenType: COLON}, nil
+		case ',':
+			l.buf = l.buf[i+1:]
+			return token{tokenType: COMMA}, nil
+		case ' ', '\n', '\t', '\r':
+			j := i + 1
+			for ; j < len(l.buf); j++ {
+				if l.buf[j] != ' ' && l.buf[j] != '\n' && l.buf[j] != '\t' && l.buf[j] != '\r' {
+					break
+				}
+			}
+			i = j
+		default:
+			return token{}, fmt.Errorf("unexpected character %c", l.buf[i])
 		}
 	}
 
-	return token{}, io.EOF
+	l.buf = nil
+	return l.getNextToken()
 }
 
 func main() {
@@ -140,14 +186,36 @@ func parse(tokens []token) error {
 	currentTokenType := tokens[0].tokenType
 	possibleNextTokens := map[tokenType][]tokenType{
 		OBJECT_START: {OBJECT_START, OBJECT_END, STRING},
-		OBJECT_END:   {OBJECT_END, COMMA},
-		STRING:       {COLON},
+		OBJECT_END:   {OBJECT_END, COMMA, ARRAY_END},
+		STRING:       {COLON, COMMA, OBJECT_END},
+		COLON:        {STRING, NUMBER, TRUE, FALSE, NULL, OBJECT_START, ARRAY_START},
+		COMMA:        {STRING, NUMBER, TRUE, FALSE, NULL, OBJECT_START, ARRAY_START},
+		ARRAY_START:  {ARRAY_START, ARRAY_END, OBJECT_START, STRING, NUMBER, TRUE, FALSE, NULL},
+		ARRAY_END:    {ARRAY_END, COMMA, OBJECT_END},
 	}
 
+	var currentKey []byte
 	for i := 1; i < len(tokens); i++ {
 		nextTokenType := tokens[i].tokenType
+
 		if !slices.Contains(possibleNextTokens[currentTokenType], nextTokenType) {
 			return fmt.Errorf("unexpected token %s after %s", nextTokenType, currentTokenType)
+		}
+
+		if currentKey == nil {
+			if currentTokenType == STRING {
+				if nextTokenType != COLON {
+					return fmt.Errorf("expected COLON after key %s, got %s", currentKey, nextTokenType)
+				}
+				currentKey = tokens[i-1].value
+			}
+		} else {
+			if currentTokenType == STRING {
+				if nextTokenType != COMMA && nextTokenType != OBJECT_END {
+					return fmt.Errorf("expected COMMA or OBJECT_END after value %s, got %s", currentKey, nextTokenType)
+				}
+				currentKey = nil
+			}
 		}
 
 		currentTokenType = nextTokenType
