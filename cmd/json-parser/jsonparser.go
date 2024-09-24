@@ -59,83 +59,106 @@ type token struct {
 }
 
 type lexer struct {
-	reader io.Reader
-	buf    []byte
+	reader   io.Reader
+	buf      []byte
+	readNext bool
 }
 
 func newLexer(reader io.Reader) *lexer {
-	return &lexer{reader, nil}
+	return &lexer{reader, nil, true}
 }
 
 func (l *lexer) getNextToken() (token, error) {
-	if len(l.buf) == 0 {
-		buf := make([]byte, 64)
+	if l.readNext {
+		buf := make([]byte, 16)
 		n, err := l.reader.Read(buf)
 		if err != nil {
 			return token{}, err
 		}
 
-		l.buf = buf[:n]
+		l.buf = append(l.buf, buf[:n]...)
 	}
 
-	var i int
-	for i < len(l.buf) {
-		switch l.buf[i] {
-		case '{':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: OBJECT_START}, nil
-		case '}':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: OBJECT_END}, nil
-		case '[':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: ARRAY_START}, nil
-		case ']':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: ARRAY_END}, nil
-		case '"':
-			strVal := make([]byte, 0, 8)
-			j := i + 1
-			escape := false
-			for ; j < len(l.buf); j++ {
-				if l.buf[j] == '"' && !escape {
-					break
-				}
-				strVal = append(strVal, l.buf[j])
-				if l.buf[j] == '\\' {
-					escape = !escape
-				} else {
-					escape = false
-				}
-			}
-
-			if j < len(l.buf) {
-				l.buf = l.buf[j+1:]
-				return token{tokenType: STRING, value: strVal}, nil
-			} else {
-				return token{}, fmt.Errorf("TODO: handle string spanning multiple buffers")
-			}
-		case ':':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: COLON}, nil
-		case ',':
-			l.buf = l.buf[i+1:]
-			return token{tokenType: COMMA}, nil
-		case ' ', '\n', '\t', '\r':
-			j := i + 1
-			for ; j < len(l.buf); j++ {
-				if l.buf[j] != ' ' && l.buf[j] != '\n' && l.buf[j] != '\t' && l.buf[j] != '\r' {
-					break
-				}
-			}
-			i = j
-		default:
-			return token{}, fmt.Errorf("unexpected character %c", l.buf[i])
+	l.readNext = false
+	firstChar := l.buf[0]
+	switch firstChar {
+	case '{':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
 		}
-	}
+		return token{tokenType: OBJECT_START}, nil
+	case '}':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return token{tokenType: OBJECT_END}, nil
+	case '[':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return token{tokenType: ARRAY_START}, nil
+	case ']':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return token{tokenType: ARRAY_END}, nil
+	case '"':
+		strVal := make([]byte, 0, 8)
+		j := 1
+		escape := false
+		for ; j < len(l.buf); j++ {
+			if l.buf[j] == '"' && !escape {
+				break
+			}
+			strVal = append(strVal, l.buf[j])
+			if l.buf[j] == '\\' {
+				escape = !escape
+			} else {
+				escape = false
+			}
+		}
 
-	l.buf = nil
-	return l.getNextToken()
+		if j < len(l.buf) {
+			l.buf = l.buf[j+1:]
+			if len(l.buf) == 0 {
+				l.readNext = true
+			}
+			return token{tokenType: STRING, value: strVal}, nil
+		} else {
+			l.readNext = true
+			return l.getNextToken()
+		}
+	case ':':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return token{tokenType: COLON}, nil
+	case ',':
+		l.buf = l.buf[1:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return token{tokenType: COMMA}, nil
+	case ' ', '\n', '\t', '\r':
+		j := 1
+		for ; j < len(l.buf); j++ {
+			if l.buf[j] != ' ' && l.buf[j] != '\n' && l.buf[j] != '\t' && l.buf[j] != '\r' {
+				break
+			}
+		}
+		l.buf = l.buf[j:]
+		if len(l.buf) == 0 {
+			l.readNext = true
+		}
+		return l.getNextToken()
+	default:
+		return token{}, fmt.Errorf("unexpected character %c", firstChar)
+	}
 }
 
 func main() {
